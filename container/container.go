@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"bytes"
+
 	docker "github.com/fsouza/go-dockerclient"
 )
 
@@ -40,4 +42,23 @@ func GetContainerByName(client *docker.Client, name string) (*docker.APIContaine
 
 	// I don't know why I'm always doing this stupid thing
 	return &containers[0], nil
+}
+
+//GetOutputFromStoppedContainer  return the output of a stopped container as string
+func GetOutputFromStoppedContainer(c *docker.Client, id string) (string, error) {
+	var buf bytes.Buffer
+	logsOptions := docker.LogsOptions{
+		Container:    id,
+		OutputStream: &buf,
+		Stdout:       true,
+		Stderr:       true,
+		Follow:       true,
+	}
+
+	err := c.Logs(logsOptions)
+	if err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
 }
