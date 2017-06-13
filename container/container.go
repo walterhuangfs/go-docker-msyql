@@ -1,8 +1,13 @@
 package container
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"bytes"
@@ -61,4 +66,53 @@ func GetOutputFromStoppedContainer(c *docker.Client, id string) (string, error) 
 	}
 
 	return buf.String(), nil
+}
+
+// MySQLContainerAvailable block and wait for mysql container
+// to be available
+func MySQLContainerAvailable(c *docker.Client, id string, timeout time.Duration) error {
+	// Use pipe to read logs
+	r, w := io.Pipe()
+	go func() {
+		c.Logs(docker.LogsOptions{
+			Container:    id,
+			OutputStream: w,
+			ErrorStream:  w,
+			Follow:       true,
+			Stdout:       true,
+			Stderr:       true,
+			Tail:         "0",
+		})
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(reader io.Reader, wg *sync.WaitGroup) {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line)
+			if strings.Contains(line, "starting as process 1") {
+				log.Println("Database started!")
+				wg.Done()
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintln(os.Stderr, "There was an error with the scanner in logging container", err)
+		}
+	}(r, &wg)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return &containerError{"Time out waiting for database to be available"}
+	}
 }

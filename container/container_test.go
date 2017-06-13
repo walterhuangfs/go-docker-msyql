@@ -7,6 +7,8 @@ import (
 
 	"strings"
 
+	"time"
+
 	docker "github.com/fsouza/go-dockerclient"
 )
 
@@ -20,8 +22,9 @@ func testClient() *docker.Client {
 	return client
 }
 
-func testContainer(c *docker.Client) *docker.Container {
-	config := docker.Config{Image: "golang:1.6", AttachStdout: true, AttachStderr: true}
+func testContainer(c *docker.Client, repository string, tag string) *docker.Container {
+	c.PullImage(docker.PullImageOptions{Repository: repository, Tag: tag}, docker.AuthConfiguration{})
+	config := docker.Config{Image: repository + ":" + tag, AttachStdout: true, AttachStderr: true}
 	container, err := c.CreateContainer(docker.CreateContainerOptions{Name: "testContainer", Config: &config})
 	if err != nil {
 		panic(err)
@@ -33,19 +36,14 @@ func testContainer(c *docker.Client) *docker.Container {
 // Clean up the mess
 func cleanup(c *docker.Client, id string) {
 	fmt.Printf("Cleaning up %s\n", id)
-	c.StopContainer(id, 10)
-
-	err := c.RemoveContainer(docker.RemoveContainerOptions{ID: id})
-	if err != nil {
-		panic(err)
-	}
+	c.RemoveContainer(docker.RemoveContainerOptions{ID: id, Force: true})
 }
 
 func TestGetContainerByName(t *testing.T) {
 
 	// Test fixture setup
 	testClient := testClient()
-	testContainer := testContainer(testClient)
+	testContainer := testContainer(testClient, "golang", "1.6")
 	// Start the container
 	testClient.StartContainer(testContainer.ID, &docker.HostConfig{})
 
@@ -102,5 +100,30 @@ func TestGetOutputFromStopppedCOntainer(t *testing.T) {
 	if !strings.Contains(output, "bin") {
 		t.Error("Output should contain bin, instead ", output)
 		return
+	}
+}
+
+func TestMySQLAvailability(t *testing.T) {
+	// Test fixture setup
+	testClient := testClient()
+
+	config := docker.Config{
+		Image:        "mysql:5.6",
+		AttachStdout: true,
+		AttachStderr: true,
+		Env:          []string{"MYSQL_ROOT_PASSWORD=password"}}
+
+	mysqlContainer, err := testClient.CreateContainer(docker.CreateContainerOptions{Name: "testMySQLContainer", Config: &config})
+	if err != nil {
+		panic(err)
+	}
+
+	// Start the MySQL container
+	testClient.StartContainer(mysqlContainer.ID, &docker.HostConfig{})
+	defer cleanup(testClient, mysqlContainer.ID)
+
+	err = MySQLContainerAvailable(testClient, mysqlContainer.ID, 20000*time.Millisecond)
+	if err != nil {
+		t.Error(err)
 	}
 }
