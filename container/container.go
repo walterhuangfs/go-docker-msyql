@@ -3,7 +3,6 @@ package container
 import (
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"bytes"
@@ -73,27 +72,17 @@ func MySQLContainerAvailable(c *docker.Client, id string, timeout time.Duration)
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func(listener chan *docker.APIEvents, wg *sync.WaitGroup) {
+	done := make(chan struct{})
+	go func(listener chan *docker.APIEvents, done chan struct{}) {
 		for {
-			select {
-			case event := <-listener:
-				//XXX Why health_status: healthy ?? not parsable
-				if event.ID == id && event.Type == "container" && event.Action == "health_status: healthy" {
-					fmt.Println("MySQL container started completed.")
-					wg.Done()
-				}
+			event := <-listener
+			//XXX Why health_status: healthy ?? not parsable
+			if event.ID == id && event.Type == "container" && event.Action == "health_status: healthy" {
+				fmt.Println("MySQL container started completed.")
+				close(done)
 			}
 		}
-	}(listener, &wg)
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+	}(listener, done)
 
 	select {
 	case <-done:
