@@ -111,7 +111,8 @@ func TestMySQLAvailability(t *testing.T) {
 		Image:        "mysql:5.6",
 		AttachStdout: true,
 		AttachStderr: true,
-		Env:          []string{"MYSQL_ROOT_PASSWORD=password"}}
+		Env:          []string{"MYSQL_ROOT_PASSWORD=password"},
+		Healthcheck:  &docker.HealthConfig{Interval: 2000 * time.Millisecond, Retries: 10, Test: []string{"CMD-SHELL", "mysqladmin -ppassword ping --silent"}}}
 
 	mysqlContainer, err := testClient.CreateContainer(docker.CreateContainerOptions{Name: "testMySQLContainer", Config: &config})
 	if err != nil {

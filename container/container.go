@@ -1,12 +1,8 @@
 package container
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -71,37 +67,27 @@ func GetOutputFromStoppedContainer(c *docker.Client, id string) (string, error) 
 // MySQLContainerAvailable block and wait for mysql container
 // to be available
 func MySQLContainerAvailable(c *docker.Client, id string, timeout time.Duration) error {
-	// Use pipe to read logs
-	r, w := io.Pipe()
-	go func() {
-		c.Logs(docker.LogsOptions{
-			Container:    id,
-			OutputStream: w,
-			ErrorStream:  w,
-			Follow:       true,
-			Stdout:       true,
-			Stderr:       true,
-			Tail:         "0",
-		})
-	}()
+	listener := make(chan *docker.APIEvents)
+	err := c.AddEventListener(listener)
+	if err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(reader io.Reader, wg *sync.WaitGroup) {
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line)
-			if strings.Contains(line, "starting as process 1") {
-				log.Println("Database started!")
-				wg.Done()
+	go func(listener chan *docker.APIEvents, wg *sync.WaitGroup) {
+		for {
+			select {
+			case event := <-listener:
+				//XXX Why health_status: healthy ?? not parsable
+				if event.ID == id && event.Type == "container" && event.Action == "health_status: healthy" {
+					fmt.Println("MySQL container started completed.")
+					wg.Done()
+				}
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintln(os.Stderr, "There was an error with the scanner in logging container", err)
-		}
-	}(r, &wg)
+	}(listener, &wg)
 
 	done := make(chan struct{})
 	go func() {
